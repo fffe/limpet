@@ -11,8 +11,8 @@
     } while (0);
 
 typedef struct mapped_elf {
-    size_t size;
     int fd;
+    size_t size;
     int class;
     union {
         Elf32_Ehdr *ehdr32;
@@ -30,7 +30,15 @@ typedef struct mapped_elf {
     uint8_t *data;
 } Mapped_Elf;
 
-Mapped_Elf *map_elf(char *, int);
-void unmap_elf(Mapped_Elf *, int);
-void patch_text_gap(Mapped_Elf *, Mapped_Elf *);
+typedef struct mapped_payload {
+    int fd;
+    size_t size;
+    uint8_t *data;
+} Mapped_Payload;
+
+Mapped_Elf *map_elf(char *);
+Mapped_Payload *map_payload(char *);
+void unmap_elf(Mapped_Elf *);
+void unmap_payload(Mapped_Payload *);
+void patch_text_gap(Mapped_Elf *, Mapped_Payload *);
 #endif
