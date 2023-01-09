@@ -118,6 +118,9 @@ void unmap_payload(Mapped_Payload *payload) {
 }
 
 void patch_text_gap(Mapped_Elf *target, Mapped_Payload *payload) {
+    uint32_t stub_len = 0, entry_point_offset = 0;
+    uint8_t *stub = NULL;
+
     if (target->class == ELFCLASS32) {
         // look for a loadable, executable segment with a large enough gap for the payload
         for (int i = 0; i <= target->ehdr32->e_phnum; i++) {
@@ -126,9 +129,6 @@ void patch_text_gap(Mapped_Elf *target, Mapped_Payload *payload) {
 
             if ((target->phdr32[i].p_flags & (PF_R | PF_X)) != (PF_R | PF_X))
                 continue;
-
-            uint32_t stub_len = 0;
-            uint8_t *stub = NULL;
 
             if (0) {
             }
@@ -142,12 +142,10 @@ void patch_text_gap(Mapped_Elf *target, Mapped_Payload *payload) {
             if (!stub_len || !stub)
                 DIE("no support for this architecture");
 
-            /* x86 */
             uint32_t aligned_memsz = PAD(target->phdr32[i].p_memsz, 4);
             if (PAD(target->phdr32[i].p_memsz, target->phdr32[i].p_align) - aligned_memsz < payload->size + stub_len)
                 continue;
 
-            uint32_t entry_point_offset = 0;
             if (0) {
             }
 #ifdef HAVE_X86
@@ -188,8 +186,6 @@ void patch_text_gap(Mapped_Elf *target, Mapped_Payload *payload) {
             if ((target->phdr64[i].p_flags & (PF_R | PF_X)) != (PF_R | PF_X))
                 continue;
 
-            uint32_t stub_len = 0;
-            uint8_t *stub = NULL;
             if (0) {
             }
 #ifdef HAVE_X86_64
@@ -212,7 +208,6 @@ void patch_text_gap(Mapped_Elf *target, Mapped_Payload *payload) {
             if (PAD(target->phdr64[i].p_memsz, target->phdr64[i].p_align) - aligned_memsz < payload->size + stub_len)
                 continue;
 
-            uint32_t entry_point_offset = 0;
             if (0) {
             }
 #ifdef HAVE_X86_64
