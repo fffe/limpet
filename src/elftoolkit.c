@@ -82,6 +82,13 @@ Mapped_Elf *map_elf(char *filename) {
     return elf;
 }
 
+void unmap_elf(Mapped_Elf *elf) {
+    msync(elf->data, elf->size, MS_SYNC);
+    munmap(elf->data, elf->size);
+    close(elf->fd);
+    free(elf);
+}
+
 Mapped_Payload *map_payload(char *filename) {
     Mapped_Payload *payload = malloc(sizeof(Mapped_Payload));
     if (payload == NULL)
@@ -104,13 +111,6 @@ Mapped_Payload *map_payload(char *filename) {
     return payload;
 }
 
-void unmap_elf(Mapped_Elf *elf) {
-    msync(elf->data, elf->size, MS_SYNC);
-    munmap(elf->data, elf->size);
-    close(elf->fd);
-    free(elf);
-}
-
 void unmap_payload(Mapped_Payload *payload) {
     munmap(payload->data, payload->size);
     close(payload->fd);
@@ -119,121 +119,143 @@ void unmap_payload(Mapped_Payload *payload) {
 
 void patch_text_gap(Mapped_Elf *target, Mapped_Payload *payload) {
     if (target->class == ELFCLASS32) {
+        // look for a loadable, executable segment with a large enough gap for the payload
+        for (int i = 0; i <= target->ehdr32->e_phnum; i++) {
+            if (target->phdr32[i].p_type != PT_LOAD)
+                continue;
+
+            if ((target->phdr32[i].p_flags & (PF_R | PF_X)) != (PF_R | PF_X))
+                continue;
+
+            uint32_t stub_len = 0;
+            uint8_t *stub = NULL;
+
+            if (0) {
+            }
 #ifdef HAVE_X86
-        if (target->ehdr32->e_machine == EM_386) {
+            else if (target->ehdr32->e_machine == EM_386) {
+                stub_len = stub_x86_len;
+                stub = stub_x86;
+            }
+#endif
+
+            if (!stub_len || !stub)
+                DIE("no support for this architecture");
+
             /* x86 */
-            // look for a loadable, executable segment with a large enough gap for the payload
-            for (int i = 0; i <= target->ehdr32->e_phnum; i++) {
-                if (target->phdr32[i].p_type != PT_LOAD)
-                    continue;
+            uint32_t aligned_memsz = PAD(target->phdr32[i].p_memsz, 4);
+            if (PAD(target->phdr32[i].p_memsz, target->phdr32[i].p_align) - aligned_memsz < payload->size + stub_len)
+                continue;
 
-                if ((target->phdr32[i].p_flags & (PF_R | PF_X)) != (PF_R | PF_X))
-                    continue;
-
-                uint32_t aligned_memsz = PAD(target->phdr32[i].p_memsz, 4);
-                if (PAD(target->phdr32[i].p_memsz, target->phdr32[i].p_align) - aligned_memsz <
-                    payload->size + stub_x86_len)
-                    continue;
-
-                // set entry point
-                uint32_t entry_point_offset =
-                        target->ehdr32->e_entry - (target->phdr32[i].p_vaddr + aligned_memsz + stub_x86_len);
-                target->ehdr32->e_entry = target->phdr32[i].p_vaddr + aligned_memsz;
-
-                // write the stub
-                uint8_t *patch_offset = target->data + PAD(target->phdr32[i].p_offset + target->phdr32[i].p_filesz, 4);
-                memcpy(patch_offset, &stub_x86, stub_x86_len);
-
-                // patch the stub's jmp back to the original entry point
-                memcpy(patch_offset + 6, &entry_point_offset, sizeof(uint32_t));
-
-                // add payload
-                uint32_t padding = aligned_memsz - target->phdr64[i].p_memsz;
-                memcpy(patch_offset + stub_x86_len, payload->data, payload->size);
-                target->phdr32[i].p_filesz += payload->size + stub_x86_len + padding;
-                target->phdr32[i].p_memsz += payload->size + stub_x86_len + padding;
+            uint32_t entry_point_offset = 0;
+            if (0) {
             }
-            return;
-        }
+#ifdef HAVE_X86
+            else if (target->ehdr32->e_machine == EM_386) {
+                entry_point_offset = target->ehdr32->e_entry - (target->phdr32[i].p_vaddr + aligned_memsz + stub_len);
+            }
 #endif
+
+            // set entry point
+            target->ehdr32->e_entry = target->phdr32[i].p_vaddr + aligned_memsz;
+
+            // write the stub
+            uint8_t *patch_offset = target->data + PAD(target->phdr32[i].p_offset + target->phdr32[i].p_filesz, 4);
+            memcpy(patch_offset, stub, stub_len);
+
+            // patch the stub's branch back to the original entry point
+            if (0) {
+            }
+#ifdef HAVE_X86
+            else if (target->ehdr32->e_machine == EM_386) {
+                memcpy(patch_offset + 6, &entry_point_offset, sizeof(uint32_t));
+            }
+#endif
+
+            // add payload
+            uint32_t padding = aligned_memsz - target->phdr64[i].p_memsz;
+            memcpy(patch_offset + stub_len, payload->data, payload->size);
+            target->phdr32[i].p_filesz += payload->size + stub_len + padding;
+            target->phdr32[i].p_memsz += payload->size + stub_len + padding;
+        }
+        return;
     } else if (target->class == ELFCLASS64) {
-#ifdef HAVE_X86_64
-        if (target->ehdr64->e_machine == EM_X86_64) {
-            /* x86-64 */
-            // look for a loadable, executable segment with a large enough gap for the payload
-            for (int i = 0; i <= target->ehdr64->e_phnum; i++) {
-                if (target->phdr64[i].p_type != PT_LOAD)
-                    continue;
+        // look for a loadable, executable segment with a large enough gap for the payload
+        for (int i = 0; i <= target->ehdr64->e_phnum; i++) {
+            if (target->phdr64[i].p_type != PT_LOAD)
+                continue;
 
-                if ((target->phdr64[i].p_flags & (PF_R | PF_X)) != (PF_R | PF_X))
-                    continue;
+            if ((target->phdr64[i].p_flags & (PF_R | PF_X)) != (PF_R | PF_X))
+                continue;
 
-                uint32_t aligned_memsz = PAD(target->phdr64[i].p_memsz, 4);
-                if (PAD(target->phdr64[i].p_memsz, target->phdr64[i].p_align) - aligned_memsz <
-                    payload->size + stub_x86_64_len)
-                    continue;
-
-                // set entry point 
-                uint32_t entry_point_offset =
-                        target->ehdr64->e_entry - (target->phdr64[i].p_vaddr + aligned_memsz + stub_x86_64_len);
-                target->ehdr64->e_entry = target->phdr64[i].p_vaddr + aligned_memsz;
-
-                // write the stub
-                uint8_t *patch_offset = target->data + PAD(target->phdr64[i].p_offset + target->phdr64[i].p_filesz, 4);
-                memcpy(patch_offset, &stub_x86_64, stub_x86_64_len);
-
-                // patch the stub's jmp back to the original entry point
-                memcpy(patch_offset + 6, &entry_point_offset, sizeof(uint32_t));
-
-                // add payload
-                uint32_t padding = aligned_memsz - target->phdr64[i].p_memsz;
-                memcpy(patch_offset + stub_x86_64_len, payload->data, payload->size);
-                target->phdr64[i].p_filesz += payload->size + stub_x86_64_len + padding;
-                target->phdr64[i].p_memsz += payload->size + stub_x86_64_len + padding;
+            uint32_t stub_len = 0;
+            uint8_t *stub = NULL;
+            if (0) {
             }
-            return;
-        }
+#ifdef HAVE_X86_64
+            else if (target->ehdr32->e_machine == EM_X86_64) {
+                stub_len = stub_x86_64_len;
+                stub = stub_x86_64;
+            }
+#endif
+#ifdef HAVE_AARCH64
+            else if (target->ehdr32->e_machine == EM_AARCH64) {
+                stub_len = stub_aarch64_len;
+                stub = stub_aarch64;
+            }
 #endif
 
+            if (!stub_len || !stub)
+                DIE("no support for this architecture");
+
+            uint32_t aligned_memsz = PAD(target->phdr64[i].p_memsz, 4);
+            if (PAD(target->phdr64[i].p_memsz, target->phdr64[i].p_align) - aligned_memsz < payload->size + stub_len)
+                continue;
+
+            uint32_t entry_point_offset = 0;
+            if (0) {
+            }
+#ifdef HAVE_X86_64
+            else if (target->ehdr32->e_machine == EM_X86_64) {
+                entry_point_offset = target->ehdr64->e_entry - (target->phdr64[i].p_vaddr + aligned_memsz + stub_len);
+            }
+#endif
 #ifdef HAVE_AARCH64
-        if (target->ehdr64->e_machine == EM_AARCH64) {
-            /* AARCH64 */
-            // look for a loadable, executable segment with a large enough gap for the payload
-            for (int i = 0; i <= target->ehdr64->e_phnum; i++) {
-                if (target->phdr64[i].p_type != PT_LOAD)
-                    continue;
+            else if (target->ehdr32->e_machine == EM_AARCH64) {
+                entry_point_offset = (target->ehdr64->e_entry - (target->phdr64[i].p_vaddr + aligned_memsz + 4)) / 4;
+            }
+#endif
 
-                if ((target->phdr64[i].p_flags & (PF_R | PF_X)) != (PF_R | PF_X))
-                    continue;
+            // set entry point
+            target->ehdr64->e_entry = target->phdr64[i].p_vaddr + aligned_memsz;
 
-                uint32_t aligned_memsz = PAD(target->phdr64[i].p_memsz, 4);
-                if (PAD(target->phdr64[i].p_memsz, target->phdr64[i].p_align) - aligned_memsz <
-                    payload->size + stub_aarch64_len)
-                    continue;
+            // write the stub
+            uint8_t *patch_offset = target->data + PAD(target->phdr64[i].p_offset + target->phdr64[i].p_filesz, 4);
+            memcpy(patch_offset, stub, stub_len);
 
-                // set entry point (dword indexed)
-                uint32_t entry_point_offset =
-                        (target->ehdr64->e_entry - (target->phdr64[i].p_vaddr + aligned_memsz + 4)) / 4;
-                target->ehdr64->e_entry = target->phdr64[i].p_vaddr + aligned_memsz;
-
-                // write the stub
-                uint8_t *patch_offset = target->data + PAD(target->phdr64[i].p_offset + target->phdr64[i].p_filesz, 4);
-                memcpy(patch_offset, &stub_aarch64, stub_aarch64_len);
-
-                // patch the stub's branch back to the original entry point
+            // patch the stub's branch back to the original entry point
+            if (0) {
+            }
+#ifdef HAVE_X86_64
+            else if (target->ehdr64->e_machine == EM_X86_64) {
+                memcpy(patch_offset + 6, &entry_point_offset, sizeof(uint32_t));
+            }
+#endif
+#ifdef HAVE_AARCH64
+            else if (target->ehdr64->e_machine == EM_AARCH64) {
                 uint32_t opcode = *(uint32_t *)&patch_offset[4];
                 opcode = (opcode & 0xfc000000) | (entry_point_offset & 0x03ffffff);
                 memcpy(patch_offset + 4, &opcode, sizeof(uint32_t));
-
-                // add payload
-                uint32_t padding = aligned_memsz - target->phdr64[i].p_memsz;
-                memcpy(patch_offset + stub_aarch64_len, payload->data, payload->size);
-                target->phdr64[i].p_filesz += payload->size + stub_aarch64_len + padding;
-                target->phdr64[i].p_memsz += payload->size + stub_aarch64_len + padding;
             }
-            return;
-        }
 #endif
+
+            // add payload
+            uint32_t padding = aligned_memsz - target->phdr64[i].p_memsz;
+            memcpy(patch_offset + stub_len, payload->data, payload->size);
+            target->phdr64[i].p_filesz += payload->size + stub_len + padding;
+            target->phdr64[i].p_memsz += payload->size + stub_len + padding;
+        }
+        return;
     }
 }
 
