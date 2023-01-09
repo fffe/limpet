@@ -121,7 +121,7 @@ void patch_text_gap(Mapped_Elf *target, Mapped_Payload *payload) {
     if (target->class == ELFCLASS32) {
 #ifdef HAVE_X86
         if (target->ehdr32->e_machine == EM_386) {
-            /* INTEL */
+            /* x86 */
             // look for a loadable, executable segment with a large enough gap for the payload
             for (int i = 0; i <= target->ehdr32->e_phnum; i++) {
                 if (target->phdr32[i].p_type != PT_LOAD)
@@ -130,24 +130,28 @@ void patch_text_gap(Mapped_Elf *target, Mapped_Payload *payload) {
                 if ((target->phdr32[i].p_flags & (PF_R | PF_X)) != (PF_R | PF_X))
                     continue;
 
-                if (PAD(target->phdr32[i].p_memsz, target->phdr32[i].p_align) - target->phdr32[i].p_memsz <
+                uint32_t aligned_memsz = PAD(target->phdr32[i].p_memsz, 4);
+                if (PAD(target->phdr32[i].p_memsz, target->phdr32[i].p_align) - aligned_memsz <
                     payload->size + stub_x86_len)
                     continue;
 
-                // set entry point (10 accounts for the offset of the jmp back to the original entry point)
+                // set entry point
                 uint32_t entry_point_offset =
-                        target->ehdr32->e_entry - (target->phdr32[i].p_vaddr + target->phdr32[i].p_memsz + 10);
-                target->ehdr32->e_entry = target->phdr32[i].p_vaddr + target->phdr32[i].p_memsz;
+                        target->ehdr32->e_entry - (target->phdr32[i].p_vaddr + aligned_memsz + stub_x86_len);
+                target->ehdr32->e_entry = target->phdr32[i].p_vaddr + aligned_memsz;
 
-                // write payload prefix, then patch in the offset of the original entry point for the jmp in the prefix
-                uint8_t *patch_offset = target->data + target->phdr32[i].p_offset + target->phdr32[i].p_filesz;
+                // write the stub
+                uint8_t *patch_offset = target->data + PAD(target->phdr32[i].p_offset + target->phdr32[i].p_filesz, 4);
                 memcpy(patch_offset, &stub_x86, stub_x86_len);
+
+                // patch the stub's jmp back to the original entry point
                 memcpy(patch_offset + 6, &entry_point_offset, sizeof(uint32_t));
 
                 // add payload
+                uint32_t padding = aligned_memsz - target->phdr64[i].p_memsz;
                 memcpy(patch_offset + stub_x86_len, payload->data, payload->size);
-                target->phdr32[i].p_filesz += payload->size + stub_x86_len;
-                target->phdr32[i].p_memsz += payload->size + stub_x86_len;
+                target->phdr32[i].p_filesz += payload->size + stub_x86_len + padding;
+                target->phdr32[i].p_memsz += payload->size + stub_x86_len + padding;
             }
             return;
         }
@@ -155,7 +159,7 @@ void patch_text_gap(Mapped_Elf *target, Mapped_Payload *payload) {
     } else if (target->class == ELFCLASS64) {
 #ifdef HAVE_X86_64
         if (target->ehdr64->e_machine == EM_X86_64) {
-            /* INTEL */
+            /* x86-64 */
             // look for a loadable, executable segment with a large enough gap for the payload
             for (int i = 0; i <= target->ehdr64->e_phnum; i++) {
                 if (target->phdr64[i].p_type != PT_LOAD)
@@ -164,24 +168,28 @@ void patch_text_gap(Mapped_Elf *target, Mapped_Payload *payload) {
                 if ((target->phdr64[i].p_flags & (PF_R | PF_X)) != (PF_R | PF_X))
                     continue;
 
-                if (PAD(target->phdr64[i].p_memsz, target->phdr64[i].p_align) - target->phdr64[i].p_memsz <
+                uint32_t aligned_memsz = PAD(target->phdr64[i].p_memsz, 4);
+                if (PAD(target->phdr64[i].p_memsz, target->phdr64[i].p_align) - aligned_memsz <
                     payload->size + stub_x86_64_len)
                     continue;
 
-                // set entry point (10 accounts for the offset of the jmp back to the original entry point)
+                // set entry point 
                 uint32_t entry_point_offset =
-                        target->ehdr64->e_entry - (target->phdr64[i].p_vaddr + target->phdr64[i].p_memsz + 10);
-                target->ehdr64->e_entry = target->phdr64[i].p_vaddr + target->phdr64[i].p_memsz;
+                        target->ehdr64->e_entry - (target->phdr64[i].p_vaddr + aligned_memsz + stub_x86_64_len);
+                target->ehdr64->e_entry = target->phdr64[i].p_vaddr + aligned_memsz;
 
-                // write payload prefix, then patch in the offset of the original entry point for the jmp in the prefix
-                uint8_t *patch_offset = target->data + target->phdr64[i].p_offset + target->phdr64[i].p_filesz;
+                // write the stub
+                uint8_t *patch_offset = target->data + PAD(target->phdr64[i].p_offset + target->phdr64[i].p_filesz, 4);
                 memcpy(patch_offset, &stub_x86_64, stub_x86_64_len);
+
+                // patch the stub's jmp back to the original entry point
                 memcpy(patch_offset + 6, &entry_point_offset, sizeof(uint32_t));
 
                 // add payload
+                uint32_t padding = aligned_memsz - target->phdr64[i].p_memsz;
                 memcpy(patch_offset + stub_x86_64_len, payload->data, payload->size);
-                target->phdr64[i].p_filesz += payload->size + stub_x86_64_len;
-                target->phdr64[i].p_memsz += payload->size + stub_x86_64_len;
+                target->phdr64[i].p_filesz += payload->size + stub_x86_64_len + padding;
+                target->phdr64[i].p_memsz += payload->size + stub_x86_64_len + padding;
             }
             return;
         }
@@ -198,31 +206,30 @@ void patch_text_gap(Mapped_Elf *target, Mapped_Payload *payload) {
                 if ((target->phdr64[i].p_flags & (PF_R | PF_X)) != (PF_R | PF_X))
                     continue;
 
-                /* FIXME: this check should use the aligned size */
-                /* FIXME: this check should use the aligned size */
-                /* FIXME: this check should use the aligned size */
-                if (PAD(target->phdr64[i].p_memsz, target->phdr64[i].p_align) - target->phdr64[i].p_memsz <
+                uint32_t aligned_memsz = PAD(target->phdr64[i].p_memsz, 4);
+                if (PAD(target->phdr64[i].p_memsz, target->phdr64[i].p_align) - aligned_memsz <
                     payload->size + stub_aarch64_len)
                     continue;
 
-                // set entry point (8 accounts for the payload instructions)
+                // set entry point (dword indexed)
                 uint32_t entry_point_offset =
-                        (target->ehdr64->e_entry - (target->phdr64[i].p_vaddr + target->phdr64[i].p_memsz + 4)) / 4;
-                target->ehdr64->e_entry = target->phdr64[i].p_vaddr + target->phdr64[i].p_memsz;
+                        (target->ehdr64->e_entry - (target->phdr64[i].p_vaddr + aligned_memsz + 4)) / 4;
+                target->ehdr64->e_entry = target->phdr64[i].p_vaddr + aligned_memsz;
 
-                // write payload prefix, then patch in the offset of the original entry point for the jmp in the prefix
+                // write the stub
                 uint8_t *patch_offset = target->data + PAD(target->phdr64[i].p_offset + target->phdr64[i].p_filesz, 4);
                 memcpy(patch_offset, &stub_aarch64, stub_aarch64_len);
 
-                // patch branch opcode
+                // patch the stub's branch back to the original entry point
                 uint32_t opcode = *(uint32_t *)&patch_offset[4];
                 opcode = (opcode & 0xfc000000) | (entry_point_offset & 0x03ffffff);
                 memcpy(patch_offset + 4, &opcode, sizeof(uint32_t));
 
                 // add payload
+                uint32_t padding = aligned_memsz - target->phdr64[i].p_memsz;
                 memcpy(patch_offset + stub_aarch64_len, payload->data, payload->size);
-                target->phdr64[i].p_filesz += payload->size + stub_aarch64_len;
-                target->phdr64[i].p_memsz += payload->size + stub_aarch64_len;
+                target->phdr64[i].p_filesz += payload->size + stub_aarch64_len + padding;
+                target->phdr64[i].p_memsz += payload->size + stub_aarch64_len + padding;
             }
             return;
         }
