@@ -1,0 +1,5 @@
+src/stubs/*.h
+src/payloads/*.bin
+*.o
+target
+limpet
