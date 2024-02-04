@@ -22,7 +22,7 @@ ifneq ($(HAVE_X86),)
 endif
 ifneq ($(HAVE_X86-64),)
 	ARCH_DEFINES += -DHAVE_X86_64
-	_PAYLOADS += payload_x86-64.bin
+	_PAYLOADS += payload_x86-64.bin payload_x86-64_fexecve.bin
 	_STUB_HEADERS += stub_x86-64.h
 endif
 STUB_HEADERS=$(patsubst %,src/stubs/%,$(_STUB_HEADERS))
@@ -82,7 +82,9 @@ src/payloads/payload_x86.o: src/payloads/payload_x86.s
 src/payloads/payload_x86-64.o: src/payloads/payload_x86-64.s
 	$(CC) -c -o $@ $^ -target x86_64-unknown-linux -integrated-as $(CFLAGS)
 
-
+src/payloads/payload_x86-64_fexecve.o: src/payloads/payload_x86-64_fexecve.s
+	$(CC) -c -o $@ $^ -target x86_64-unknown-linux -integrated-as $(CFLAGS)
+ 
 .PHONY: clean 
 
 clean:
