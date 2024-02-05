@@ -54,3 +54,34 @@ hello world
 hello from the payload
 $
 ```
+
+The fexecve payload for x64 can be used to inject an ELF into an ELF.
+
+To use it, add the payload to the target, append the ELF to the target, and append the length as a little endian 32bit.
+
+The example below adds /bin/ls to the target.
+
+```
+$ make LLVMCONFIG=llvm-config-14
+[...]
+
+$ ./target
+hello world
+
+$ ./limpet target src/payloads/payload_x86-64_fexecve.bin
+
+$ cat /bin/ls >> target
+
+$ ls -l /bin/ls
+-rwxr-xr-x 1 root root 142144 Sep  5  2019 /bin/ls*
+
+# there's probably an easier way to do this but whatever...
+$ echo 142144 | perl -pe '$_=join("", map(sprintf("\\x%02x", ord($_)), split(//,pack("I", $_))))."\n"'
+\x40\x2b\x02\x00
+
+$ echo -ne "\x40\x2b\x02\x00" >> target
+
+$ ./target
+hello world
+Makefile  README.md  limpet  src  target
+```
